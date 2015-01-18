@@ -1757,7 +1757,7 @@ static void complete_urb(struct urb *urb)
 	struct mcp2210_endpoint *other_ep;
 #endif
 	struct mcp2210_cmd *cmd;
-	unsigned long irqflags;
+	unsigned long irqflags = 0; // gcc complains about uninitialized value. Pretty sure gcc is wrong
 	int ret;
 	int lock_held;
 
