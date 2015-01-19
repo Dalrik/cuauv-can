@@ -7,6 +7,7 @@ user/mcp2210-util
 # Symlinks & per-user settings
 user/mcp2210-lib.c
 user/settings.h
+user/config.dat
 out-of-tree-autoconf.h
 
 # Temporary files & directories
