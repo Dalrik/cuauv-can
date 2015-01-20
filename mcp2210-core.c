@@ -884,7 +884,6 @@ int mcp2210_configure(struct mcp2210_device *dev, struct mcp2210_board_config *n
 		u8 mode = dev->config->pins[i].mode;
 
 		chip_settings.pin_mode[i] = mode;
-		dev->names[i] = dev->config->pins[i].name;
 	}
 
 	mcp2210_add_ctl_cmd(dev, MCP2210_CMD_SET_CHIP_CONFIG, 0, &chip_settings,

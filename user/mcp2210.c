@@ -478,8 +478,6 @@ int set_config(int argc, char *argv[]) {
 
 		for (i = 0; i < MCP2210_NUM_PINS; ++i) {
 			const struct mcp2210_pin_config *pin = &my_board_config.pins[i];
-			if (pin->name && *pin->name)
-				strings_size += strlen(pin->name) + 1;
 			if (pin->modalias && *pin->modalias)
 				strings_size += strlen(pin->modalias) + 1;
 		}

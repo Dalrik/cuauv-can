@@ -335,7 +335,6 @@ static void reset_string_addr(struct mcp2210_board_config *bc, const __user stru
 	for (i = 0; i < MCP2210_NUM_PINS; ++i) {
 		struct mcp2210_pin_config *pin = &bc->pins[i];
 
-		reset_string_addr_single(&pin->name, min, max, diff);
 		reset_string_addr_single(&pin->modalias, min, max, diff);
 	}
 }

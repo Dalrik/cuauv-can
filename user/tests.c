@@ -56,12 +56,6 @@ static int compare_board_config(const struct mcp2210_board_config *a,
 		if (pa->mode != pb->mode)
 			return desc;
 
-		if (!!pa->name != !!pb->name)
-			return desc | 1;
-
-		if (pa->name && strcmp(pa->name, pb->name))
-			return desc | 2;
-
 		if (!!pa->modalias != !!pb->modalias)
 			return desc | 3;
 
@@ -108,8 +102,6 @@ static void print_failed_item(int val) {
 
 		switch (val & 0xf) {
 		case 0: item = "mode"; break;
-		case 1: item = "name presence"; break;
-		case 2: item = "name"; break;
 		case 3: item = "modalias presence"; break;
 		case 4: item = "modalias"; break;
 		case 5: item = "has_irq"; break;

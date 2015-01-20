@@ -78,10 +78,6 @@ struct mcp2210_board_config *copy_board_config(
 
 	for (i = 0; i < MCP2210_NUM_PINS; ++i) {
 		const struct mcp2210_pin_config *pin = &src->pins[i];
-		printk(KERN_DEBUG "src->pins[%u].name = %p (\"%s\")\n",
-		       i, pin->name, pin->name ? pin->name : "");
-		if (pin->name)
-			str_size += strlen(pin->name) + 1;
 		printk(KERN_DEBUG "src->pins[%u].modalias = %p (\"%s\")\n",
 		       i, pin->modalias, pin->modalias ? pin->modalias : "");
 		if (pin->modalias)
@@ -111,9 +107,6 @@ struct mcp2210_board_config *copy_board_config(
 		const struct mcp2210_pin_config *src_pin = &src->pins[i];
 		struct mcp2210_pin_config *dest_pin = &dest->pins[i];
 
-		copy_board_config_string(dest->strings, str_size, &pos,
-					 &dest_pin->name,
-					 src_pin->name);
 		copy_board_config_string(dest->strings, str_size, &pos,
 					 &dest_pin->modalias,
 					 src_pin->modalias);
@@ -579,10 +572,9 @@ struct mcp2210_board_config *creek_decode(
 	/* read has_strings, validate & populate pin modes, count SPI pins */
 	for (i = 0; i < MCP2210_NUM_PINS; ++i) {
 		struct mcp2210_pin_config *pin = &tmp->pins[i];
-		u8 str_flags = creek_get_bits(&bs, 2);
+		u8 str_flags = creek_get_bits(&bs, 1);
 
-		dec.name_index[i]	= str_flags & 1 ? ++dec.str_count : 0;
-		dec.modalias_index[i]	= str_flags & 2 ? ++dec.str_count : 0;
+		dec.modalias_index[i]	= str_flags ? ++dec.str_count : 0;
 
 		switch ((pin->mode = chip_settings->pin_mode[i])) {
 		case MCP2210_PIN_GPIO:
@@ -723,9 +715,6 @@ struct mcp2210_board_config *creek_decode(
 	/* now populate our mcp2210_board_config with the string pointers */
 	board_config->strings_size = dec.str_size;
 	for (i = 0; i < MCP2210_NUM_PINS; ++i) {
-		if (dec.name_index[i])
-			board_config->pins[i].name = dec.string_index[
-						dec.name_index[i] - 1];
 		if (dec.modalias_index[i])
 			board_config->pins[i].modalias = dec.string_index[
 						dec.modalias_index[i] - 1];
@@ -794,9 +783,9 @@ int creek_encode(const struct mcp2210_board_config *src,
 	/* write has_string header */
 	for (i = 0; i < MCP2210_NUM_PINS; ++i) {
 		const struct mcp2210_pin_config *pin = &src->pins[i];
-		u8 value = (!!pin->name) | (!!pin->modalias) << 1;
+		u8 value = !!pin->modalias;
 
-		creek_put_bits(&bs, value, 2);
+		creek_put_bits(&bs, value, 1);
 	}
 	creek_debug("strings present", &bs);
 
@@ -894,11 +883,6 @@ int creek_encode(const struct mcp2210_board_config *src,
 
 	for (i = 0; i < MCP2210_NUM_PINS; ++i) {
 		const struct mcp2210_pin_config *pin = &src->pins[i];
-		if (pin->name) {
-			put_encoded_string(&bs, pin->name);
-			creek_debug("name", &bs);
-		}
-
 		if (pin->modalias) {
 			put_encoded_string(&bs, pin->modalias);
 			creek_debug("modalias", &bs);

@@ -117,7 +117,7 @@
 extern "C" {
 #endif /* __cplusplus */
 
-static const u8 CREEK_CONFIG_MAGIC[4] = {0xc0, 0x1d, 0xf0, 0x0d};
+static const u8 CREEK_CONFIG_MAGIC[4] = {0xc0, 0x1d, 0xf0, 0x0e};
 
 /**
  * struct bit_creek - a struct for managing a buffer as a FIFO stream of bits
@@ -139,7 +139,6 @@ struct creek_data {
 	const char **string_index;
 	u8 spi_pin_num[MCP2210_NUM_PINS];
 	u8 spi_count;
-	u8 name_index[MCP2210_NUM_PINS];
 	u8 modalias_index[MCP2210_NUM_PINS];
 	u8 have_gpio_irqs;
 };

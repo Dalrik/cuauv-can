@@ -538,7 +538,6 @@ struct mcp2210_pin_config {
 		u16 delay_between_xfers;
 	} spi;
 
-	const char *name;
 	const char *modalias;
 	/*const char *desc; */
 };
@@ -813,7 +812,7 @@ struct mcp2210_device {
 	u8 eeprom_state[64];
 	u8 eeprom_cache[256];
 #endif
-	const char *names[MCP2210_NUM_PINS];
+
 #ifdef CONFIG_MCP2210_GPIO
 	struct gpio_chip gpio;
 #endif

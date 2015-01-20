@@ -95,7 +95,7 @@ int mcp2210_gpio_probe(struct mcp2210_device *dev)
 	gpio->base		= -1; /* request dynamic ID allocation */
 	gpio->ngpio		= MCP2210_NUM_PINS;
 	/* private: gpio->desc */
-	gpio->names		= (void*)dev->names; /* older kernels use char** */
+	gpio->names		= NULL; /* Don't permit device to set gpio names (unsafe printf use) */
 	gpio->can_sleep		= 1; /* we have to make them sleep because we
 					need to do an URB */
 	gpio->exported		= 0;

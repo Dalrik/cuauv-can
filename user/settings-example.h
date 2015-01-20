@@ -79,29 +79,22 @@ static const struct mcp2210_board_config my_board_config = {
 			.spi.delay_between_bytes = 1,
 			.spi.delay_between_xfers = 1,
 			.modalias = "spidev",
-			.name = "L6470",
 		}, {
 			.mode = MCP2210_PIN_GPIO,
 			.has_irq = 0,
 			.irq = 0,
-			.name = "unused%d",
 		}, {
 			.mode = MCP2210_PIN_DEDICATED,
-			.name = "SSPND"
 		}, {
 			.mode = MCP2210_PIN_DEDICATED,
-			.name = "LED",
 		}, {
 			.mode = MCP2210_PIN_DEDICATED,
-			.name = "LOWPWR",
 		}, {
 			.mode = MCP2210_PIN_DEDICATED,
-			.name = "USBCFG",
 		}, {
 			.mode = MCP2210_PIN_DEDICATED,
 			.has_irq = 0,
 			.irq = 0,
-			.name = "MOTION",
 		}, {
 			.mode = MCP2210_PIN_SPI,
 			.has_irq = 0,
@@ -117,10 +110,8 @@ static const struct mcp2210_board_config my_board_config = {
 			.spi.delay_between_bytes = 4,
 			.spi.delay_between_xfers = 10,
 			.modalias = "spidev",
-			.name = "ADNS-9800",
 		}, {
 			.mode = MCP2210_PIN_GPIO,
-			.name = "unused%d",
 		}
 	},
 	.poll_gpio_usecs	      = 0, //10000 * 1000,
