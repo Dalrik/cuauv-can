@@ -533,7 +533,7 @@ static int spi_prepare_device(struct mcp2210_cmd_spi_msg *cmd)
 		return spi_ctl_cmd_submit_prepare(cmd);
 	}
 
-	if (cmd->spi->mode | SPI_3WIRE) {
+	if (cmd->spi->mode & SPI_3WIRE) {
 		/* TODO: setup gpio controlling mosi */
 	}
 

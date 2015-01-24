@@ -169,7 +169,6 @@ static inline long IS_ERR_OR_NULL(const void *ptr)	{return !ptr || IS_ERR_VALUE(
 #define MCP2210_BUFFER_SIZE	64
 #define MCP2210_MAX_SPEED	(12 * 1000 * 1000)
 #define MCP2210_MIN_SPEED	1500
-#define MCP2210_EEPROM_SIZE	256
 #define MCP2210_NUM_PINS	9
 
 static const char * const urb_dir_str[] = {"out", "in"};
@@ -261,13 +260,6 @@ enum mcp2210_gpio_direction {
 	MCP2210_GPIO_INPUT	= 1
 };
 
-enum mcp2210_eeprom_status {
-	MCP2210_EEPROM_UNREAD	    = 0,
-	MCP2210_EEPROM_READ_PENDING = 1,
-	MCP2210_EEPROM_READ	    = 2,
-	MCP2210_EEPROM_DIRTY	    = 3
-};
-
 enum mcp2210_cmd_type_id {
 	MCP2210_CMD_TYPE_CTL,
 	MCP2210_CMD_TYPE_SPI,
@@ -346,13 +338,6 @@ struct mcp2210_msg {
 				u16 reserved;
 			} xet;
 
-			/* Request header for reads & writes to EEPROM */
-			struct {
-				u8 addr;
-				u8 value;
-				u8 reserved;
-			} eeprom;
-
 			/* Request header for SPI operations */
 			struct {
 				u8 size;
@@ -378,13 +363,6 @@ struct mcp2210_msg {
 				u8 sub_cmd;
 				u8 reserved;
 			} xet;
-
-			/* Response header for reads & writes to EEPROM */
-			struct {
-				u8 status;
-				u8 addr;
-				u8 value;
-			} eeprom;
 
 			/* Response header for SPI messages */
 			struct {
@@ -699,19 +677,10 @@ struct mcp2210_cmd_spi_msg {
 	struct mcp2210_cmd_ctl *ctl_cmd;
 };
 
-struct mcp2210_cmd_eeprom {
-	struct mcp2210_cmd head;
-	u8 op;
-	u8 addr;
-	u8 zero_tail;
-	u16 size;
-};
-
 union mcp2210_cmd_any {
 	struct mcp2210_cmd *head;
 	struct mcp2210_cmd_ctl *ctl;
 	struct mcp2210_cmd_spi_msg *spi;
-	struct mcp2210_cmd_eeprom *eeprom;
 };
 
 
@@ -807,11 +776,6 @@ struct mcp2210_device {
 	struct mcp2210_state s;
 	struct mcp2210_board_config *config;
 	struct mcp2210_cmd_ctl ctl_cmd;
-#ifdef CONFIG_MCP2210_EEPROM
-	spinlock_t eeprom_spinlock;
-	u8 eeprom_state[64];
-	u8 eeprom_cache[256];
-#endif
 
 #ifdef CONFIG_MCP2210_GPIO
 	struct gpio_chip gpio;
@@ -877,14 +841,6 @@ void calculate_spi_settings(struct mcp2210_spi_xfer_settings *dest,
 
 
 /*****************************************************************************
- * mcp2210-ioctl.c
- */
-#ifdef CONFIG_MCP2210_IOCTL
-long mcp2210_ioctl(struct file *file, unsigned int request, unsigned long arg);
-#endif
-
-
-/*****************************************************************************
  * mcp2210-spi.c
  */
 #ifdef CONFIG_MCP2210_SPI
@@ -907,31 +863,6 @@ static inline int  mcp2210_gpio_probe (struct mcp2210_device *dev) {return 0;}
 static inline void mcp2210_gpio_remove(struct mcp2210_device *dev) {}
 #endif /* CONFIG_MCP2210_GPIO */
 
-
-/*****************************************************************************
- * mcp2210-eeprom.c
- */
-#ifdef CONFIG_MCP2210_EEPROM
-/* locks dev->eeprom_spinlock */
-int
-mcp2210_eeprom_read(struct mcp2210_device *dev, u8 *dest, u8 addr, u16 size,
-		    mcp2210_complete_t complete, void *context,
-		    gfp_t gfp_flags);
-int
-mcp2210_eeprom_write(struct mcp2210_device *dev, const u8 *src, u8 addr,
-		     u16 size, mcp2210_complete_t complete, void *context,
-		     gfp_t gfp_flags);
-#else
-static inline int
-mcp2210_eeprom_read(struct mcp2210_device *dev, u8 *dest, u8 addr, u16 size,
-		    mcp2210_complete_t complete, void *context,
-		    gfp_t gfp_flags) {return 0;}
-static inline int
-mcp2210_eeprom_write(struct mcp2210_device *dev, const u8 *src, u8 addr,
-		     u16 size, mcp2210_complete_t complete, void *context,
-		     gfp_t gfp_flags) {return 0;}
-#endif /* CONFIG_MCP2210_EEPROM */
-
 /*****************************************************************************
  * mcp2210-irq.c
  */
@@ -941,6 +872,7 @@ void mcp2210_irq_remove(struct mcp2210_device *dev);
 int mcp2210_gpio_to_irq(struct gpio_chip *chip, unsigned offset);
 void _mcp2210_irq_do_gpio(struct mcp2210_device *dev, u16 old_val, u16 new_val);
 void _mcp2210_irq_do_intr_counter(struct mcp2210_device *dev, u16 count);
+unsigned int mcp2210_irq_find(struct mcp2210_device *dev, u8 hwirq);
 static inline void mcp2210_irq_do_gpio(struct mcp2210_device *dev,
 				       u16 old_val, u16 new_val)
 {
@@ -957,6 +889,7 @@ static inline void mcp2210_irq_do_intr_counter(struct mcp2210_device *dev,
 #else
 static inline int  mcp2210_irq_probe (struct mcp2210_device *dev) {return 0;}
 static inline void mcp2210_irq_remove(struct mcp2210_device *dev) {}
+static inline unsigned int mcp2210_irq_find(struct mcp2210_device *dev, int hwirq) {return 0;}
 static inline void mcp2210_irq_do_gpio(struct mcp2210_device *dev,
 				       u16 old_val, u16 new_val) {}
 static inline void mcp2210_irq_do_intr_counter(struct mcp2210_device *dev,
@@ -1034,56 +967,6 @@ struct mcp2210_board_config *copy_board_config(
 		gfp_t gfp_flags);
 int validate_board_config(const struct mcp2210_board_config *src,
 			  const struct mcp2210_chip_settings *chip);
-
-#define MCP2210_IOCTL_MAGIC 0xba
-#define READ_IOCTL  _IOR(MCP2210_IOCTL_MAGIC, 0, int)
-#define WRITE_IOCTL _IOW(MCP2210_IOCTL_MAGIC, 1, int)
-
-enum mcp2210_ioctl_cmd {
-	MCP2210_IOCTL_CMD,
-	MCP2210_IOCTL_EEPROM,
-	MCP2210_IOCTL_CONFIG_GET,
-	MCP2210_IOCTL_CONFIG_SET,
-	MCP2210_IOCTL_MAX
-};
-
-static const unsigned int mcp2210_ioctl_map[] = {
-    _IOWR(MCP2210_IOCTL_MAGIC, MCP2210_IOCTL_CMD, void *),
-    _IOWR(MCP2210_IOCTL_MAGIC, MCP2210_IOCTL_EEPROM, void *),
-    _IOWR(MCP2210_IOCTL_MAGIC, MCP2210_IOCTL_CONFIG_GET, void *),
-    _IOW (MCP2210_IOCTL_MAGIC, MCP2210_IOCTL_CONFIG_SET, void *),
-};
-
-struct mcp2210_ioctl_data {
-	u32 struct_size;
-	union mcp2210_ioctl_data_body {
-		struct mcp2210_ioctl_data_eeprom {
-			u8 addr;
-			u16 size:9;
-			u16 is_read:1;
-			u8 data[0];
-		} eeprom;
-		struct mcp2210_ioctl_data_config {
-			u8 wait:1;
-			struct mcp2210_state state;
-			struct mcp2210_board_config config;
-		} config;
-		struct mcp2210_ioctl_data_cmd {
-			int status;
-			u8 mcp_status;
-			struct mcp2210_msg req;
-			struct mcp2210_msg rep;
-			u8 data[0];
-		} cmd;
-	} body;
-};
-
-#define IOCTL_DATA_EEPROM_SIZE offsetof( \
-			struct mcp2210_ioctl_data, body.eeprom.data)
-#define IOCTL_DATA_CONFIG_SIZE offsetof( \
-			struct mcp2210_ioctl_data, body.config.config.strings)
-#define IOCTL_DATA_CMD_SIZE  offsetof( \
-			struct mcp2210_ioctl_data, body.config.config.strings)
 
 #ifdef __cplusplus
 }

@@ -184,6 +184,15 @@ void _mcp2210_irq_do_intr_counter(struct mcp2210_device *dev, u16 count)
 		return;
 }
 
+unsigned int mcp2210_irq_find(struct mcp2210_device *dev, u8 hwirq)
+{
+    if (dev->irq_domain) {
+        return irq_find_mapping(dev->irq_domain, hwirq);
+    } else {
+        return 0;
+    }
+}
+
 static int mcp2210_irq_map(struct irq_domain *domain, unsigned int irq,
 			   irq_hw_number_t hwirq)
 {

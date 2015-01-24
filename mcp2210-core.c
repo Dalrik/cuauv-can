@@ -233,10 +233,6 @@ out of date info:
 #include "mcp2210.h"
 #include "mcp2210-debug.h"
 
-#ifdef CONFIG_MCP2210_CREEK
-# include "mcp2210-creek.h"
-#endif /* CONFIG_MCP2210_CREEK */
-
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,34)
 # define HAVE_USB_ALLOC_COHERENT 1
 #endif
@@ -339,92 +335,6 @@ static inline struct mcp2210_device *mcp2210_kref_to_dev(struct kref *kref)
 {
 	return container_of(kref, struct mcp2210_device, kref);
 }
-
-#ifdef CONFIG_MCP2210_IOCTL
-static int mcp2210_open(struct inode *inode, struct file *file)
-{
-	struct mcp2210_device *dev;
-	struct usb_interface *intf;
-	int subminor = iminor(inode);
-	int ret;
-
-	if (!(intf = usb_find_interface(&mcp2210_driver, subminor))) {
-		pr_err("%s - error, can't find device for minor %d\n",
-			__func__, subminor);
-		return -ENODEV;
-	}
-
-	if (!(dev = usb_get_intfdata(intf)))
-		return -ENODEV;
-
-	if (IS_ENABLED(CONFIG_MCP2210_AUTOPM)) {
-		ret = usb_autopm_get_interface(intf);
-		if (ret && ret != -EACCES) {
-			mcp2210_err("usb_autopm_get_interface() failed:%de", ret);
-			return ret;
-		}
-	}
-
-	kref_get(&dev->kref);
-	file->private_data = dev;
-
-	return 0;
-}
-
-static int mcp2210_release(struct inode *inode, struct file *file)
-{
-	struct mcp2210_device *dev = file->private_data;
-
-	if (!dev)
-		return -ENODEV;
-
-	/* allow the device to be autosuspended */
-	mutex_lock(&dev->io_mutex);
-	if (IS_ENABLED(CONFIG_MCP2210_AUTOPM) && dev->intf)
-		usb_autopm_put_interface(dev->intf);
-	mutex_unlock(&dev->io_mutex);
-
-	/* decrement the count on our device */
-	kref_put(&dev->kref, mcp2210_delete);
-	return 0;
-}
-
-static int mcp2210_flush (struct file *file, fl_owner_t id)
-{
-	return 0;
-}
-
-static loff_t mcp2210_no_llseek (struct file *file, loff_t offset, int i)
-{
-	return -EPERM;
-}
-
-static ssize_t mcp2210_no_read_write (struct file *file,
-				      const char __user *data, size_t size,
-				      loff_t *offset)
-{
-	return -EPERM;
-}
-
-const struct file_operations mcp2210_fops = {
-	.owner =		THIS_MODULE,
-	.unlocked_ioctl =	mcp2210_ioctl,
-	.compat_ioctl =		mcp2210_ioctl,
-	.llseek =		mcp2210_no_llseek,
-	.read =			(void*)mcp2210_no_read_write,
-	.write =		mcp2210_no_read_write,
-	.open =			mcp2210_open,
-	.flush =		mcp2210_flush,
-	.release =		mcp2210_release,
-};
-
-static struct usb_class_driver mcp2210_class = {
-	.name =		"usb2spi_bridge%d",
-	.fops =		&mcp2210_fops,
-	.minor_base =	0, /* FIXME: need a minor base from USB maintainer? */
-};
-
-#endif /* CONFIG_MCP2210_IOCTL */
 
 /******************************************************************************
  * USB Driver functions
@@ -546,138 +456,6 @@ static void mcp2210_delete(struct kref *kref)
 	kfree(dev);
 }
 
-#ifdef CONFIG_MCP2210_CREEK
-
-static int creek_configure(struct mcp2210_cmd *cmd, void *context) {
-	struct mcp2210_device *dev = cmd->dev;
-	struct mcp2210_board_config *board_config;
-	int ret;
-
-	board_config = mcp2210_creek_probe(dev, GFP_KERNEL);
-
-	BUG_ON(dev->config);
-	if (IS_ERR(board_config)) {
-		mcp2210_err("Failed to decode board config from MCP2210's user-EEPROM: %de", (int)PTR_ERR(board_config));
-		return 0;
-	}
-
-	ret = mcp2210_configure(dev, board_config);
-
-	/*
-	spin_lock_irqsave(&dev->eeprom_spinlock, irqflags);
-	magic = le32_to_cpu(*((u32*)dev->eeprom_cache));
-	spin_unlock_irqrestore(&dev->eeprom_spinlock, irqflags);
-	*/
-	return 0;
-}
-
-static int eeprom_read_complete(struct mcp2210_cmd *cmd_head, void *context)
-{
-	struct mcp2210_device *dev = context;
-	struct mcp2210_cmd_eeprom *cmd = (void *)cmd_head;
-	unsigned long irqflags;
-	int ret;
-
-	mcp2210_debug();
-
-	BUG_ON(!cmd);
-	BUG_ON(!dev);
-	BUG_ON(!cmd_head->type);
-	BUG_ON(cmd_head->type->id != MCP2210_CMD_TYPE_EEPROM);
-
-	/* deal with fuck-ups */
-	if (cmd->head.status) {
-		mcp2210_err("RPi USB otg drivers are shit, trying "
-			    "a-fucking-gain...");
-
-		ret = mcp2210_eeprom_read(dev, NULL, 0, cmd->size,
-					  eeprom_read_complete, dev,
-					  GFP_ATOMIC);
-
-		if (ret && ret != -EINPROGRESS)
-			mcp2210_err("Adding eeprom command failed with %de, fuck it", ret);
-
-		return 0;
-	}
-
-	/* We can get 0xfa (write failure) for writing to EEPROM, but we
-	 * supposedly can't get a failure for reading, so we pertty much should
-	 * always have a zero for the mcpstatus
-	 */
-	if (cmd->head.mcp_status) {
-		mcp2210_err("Unexpected failure of EEPROM read: 0x%02x",
-			    cmd->head.mcp_status);
-		return 0;
-	}
-
-	if (cmd->size == 4) {
-		u8 magic[4];
-
-		spin_lock_irqsave(&dev->eeprom_spinlock, irqflags);
-		memcpy(magic, dev->eeprom_cache, 4);
-		//magic = le32_to_cpu(*((u32*)dev->eeprom_cache));
-		spin_unlock_irqrestore(&dev->eeprom_spinlock, irqflags);
-
-		if (memcmp(magic, CREEK_CONFIG_MAGIC, 4)) {
-			mcp2210_notice("creek magic not detected: 0x%08x != "
-				       "0x%08x", *(u32*)magic, *(u32*)CREEK_CONFIG_MAGIC);
-			return 0;
-		}
-
-		mcp2210_notice("creek magic detected, reading config from EEPROM");
-		ret = mcp2210_eeprom_read(dev, NULL, 0, 0x100, eeprom_read_complete, dev, GFP_ATOMIC);
-
-		if (ret && ret != -EINPROGRESS)
-			mcp2210_err("Adding eeprom command failed with %de",
-				    ret);
-
-		return 0;
-	} else if (cmd->size == 0x100) {
-		struct mcp2210_cmd *cmd;
-
-		if (!dev->s.have_power_up_chip_settings) {
-			mcp2210_err("Don't have power up chip settings, aborting probe... :(");
-			return 0;
-		}
-
-		cmd = mcp2210_alloc_cmd(dev, NULL, sizeof(struct mcp2210_cmd), GFP_ATOMIC);
-		if (!cmd) {
-			mcp2210_err("mcp2210_alloc_cmd failed (ENOMEM)");
-			return 0;
-		}
-
-		cmd->complete = creek_configure;
-		cmd->nonatomic = 1;
-
-		ret = mcp2210_add_cmd(cmd, true);
-		if (ret)
-			return 0;
-	}
-
-#if 0
-
-	if (ret && ret != -EINPROGRESS) {
-		mcp2210_err("Adding eeprom command failed with %de", ret);
-		goto error2;
-	}
-	CREEK_CONFIG_MAGIC
-	le32_to_cpu(creek_get_bits(&bs, 32));
-	/* HACK: This is a hack for when URBs fail on the rpi, since we're not
-	 * really even using these yet */
-	dev->have_power_up_chip_settings = 1;
-	dev->have_power_up_spi_settings = 1;
-	dev->do_spi_probe = 1;
-#endif
-	return 0;
-}
-#else
-static inline int eeprom_read_complete(struct mcp2210_cmd *cmd_head,
-				       void *context)
-{
-	return 0;
-}
-#endif /* CONFIG_MCP2210_CREEK */
-
 /* mcp2210_probe
  * can sleep, but keep it minimal as the USB core uses a single thread to probe
  * & remove all USB devices.
@@ -709,9 +487,6 @@ int mcp2210_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	INIT_LIST_HEAD(&dev->delayed_list);
 	spin_lock_init(&dev->dev_spinlock);
 	spin_lock_init(&dev->queue_spinlock);
-#ifdef CONFIG_MCP2210_EEPROM
-	spin_lock_init(&dev->eeprom_spinlock);
-#endif
 	mutex_init(&dev->io_mutex);
 	ctl_cmd_init(dev, &dev->ctl_cmd, 0, 0, NULL, 0, false);
 	INIT_DELAYED_WORK(&dev->delayed_work, delayed_work_callback);
@@ -752,17 +527,6 @@ int mcp2210_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	if (IS_ENABLED(CONFIG_MCP2210_AUTOPM))
 		usb_autopm_get_interface_no_resume(intf);
 
-#ifdef CONFIG_MCP2210_IOCTL
-	/* TODO: Do I need a "major number" from maintainer?
-	 * https://www.kernel.org/doc/htmldocs/usb/API-usb-register-dev.html
-	 */
-	ret = usb_register_dev(intf, &mcp2210_class);
-	if (unlikely(ret)) {
-		mcp2210_err("failed to register device %de\n", ret);
-		goto error_autopm_put;
-	}
-#endif /* CONFIG_MCP2210_IOCTL */
-
 	/* TODO: set USB power to max until we know how much we need? */
 	dump_dev(KERN_INFO, 0, "This is the initial device state: ", dev);
 
@@ -793,15 +557,6 @@ int mcp2210_probe(struct usb_interface *intf, const struct usb_device_id *id)
 		goto error_deregister_dev;
 	}
 
-	if (IS_ENABLED(CONFIG_MCP2210_CREEK) && creek_enabled) {
-		/* read the first 4 bytes to see if we have our magic number */
-		ret = mcp2210_eeprom_read(dev, NULL, 0, 4, eeprom_read_complete, dev, GFP_KERNEL);
-		if (ret && ret != -EINPROGRESS) {
-			mcp2210_err("Adding eeprom command failed with %de", ret);
-			goto error_deregister_dev;
-		}
-	}
-
 	/* start up background cleanup thread */
 	schedule_delayed_work(&dev->delayed_work, msecs_to_jiffies(1000));
 
@@ -817,10 +572,7 @@ int mcp2210_probe(struct usb_interface *intf, const struct usb_device_id *id)
 	return 0;
 
 error_deregister_dev:
-	if (IS_ENABLED(CONFIG_MCP2210_IOCTL))
-		usb_deregister_dev(intf, &mcp2210_class);
 
-error_autopm_put:
 	if (IS_ENABLED(CONFIG_MCP2210_AUTOPM))
 		usb_autopm_put_interface(intf);
 	usb_set_intfdata(intf, NULL);
@@ -997,9 +749,6 @@ void mcp2210_disconnect(struct usb_interface *intf)
 
 	/* TODO: free GPIO resources here */
 
-#ifdef CONFIG_MCP2210_IOCTL
-	usb_deregister_dev(intf, &mcp2210_class);
-#endif
 	/* if never configured, make sure we release this */
 	if (IS_ENABLED(CONFIG_MCP2210_AUTOPM) && !dev->config)
 		usb_autopm_put_interface(dev->intf);
